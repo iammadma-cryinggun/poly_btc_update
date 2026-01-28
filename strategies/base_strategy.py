@@ -13,9 +13,10 @@ from decimal import Decimal
 
 from nautilus_trader.trading.strategy import Strategy
 from nautilus_trader.model.identifiers import InstrumentId, Venue
-from nautilus_trader.model.orders import Order
-from nautilus_trader.model.enums import OrderSide, TimeInForce
-from nautilus_trader.model.objects import Quantity, Price
+from nautilus_trader.model.orders import Order, OrderList
+from nautilus_trader.model.identifiers import OrderListId
+from nautilus_trader.model.enums import OrderSide, TimeInForce, BookType
+from nautilus_trader.model.objects import Quantity, Price, Money
 
 
 class BaseStrategy(Strategy):
@@ -45,7 +46,7 @@ class BaseStrategy(Strategy):
             f"\n"
             f"交易品种:\n"
             f"  ID: {self.instrument.id}\n"
-            f"  基础货币: {self.instrument.base_currency}\n"
+            f"  基础货币: {self.instrument.get_base_currency()}\n"
             f"  计价货币: {self.instrument.quote_currency}\n"
             f"  价格精度: {self.instrument.price_precision}\n"
             f"  数量精度: {self.instrument.size_precision}\n"
@@ -89,7 +90,7 @@ class BaseStrategy(Strategy):
         # 订阅成交
         self.subscribe_trade_ticks(self.instrument.id)
 
-        self.log.info("✅ 数据订阅完成")
+        self.log.info("[OK] 数据订阅完成")
 
     # ========== Portfolio 相关方法 ==========
 
@@ -97,7 +98,7 @@ class BaseStrategy(Strategy):
         """
         获取当前仓位信息
 
-        ✅ 使用 Portfolio 系统，不自己维护 paper_position
+        [OK] 使用 Portfolio 系统，不自己维护 paper_position
 
         Returns:
             dict | None: 仓位信息字典，如果无仓位返回 None
@@ -138,7 +139,7 @@ class BaseStrategy(Strategy):
         """
         获取账户信息
 
-        ✅ 使用 BettingAccount，不自己计算盈亏
+        [OK] 使用 BettingAccount，不自己计算盈亏
         BettingAccount 自动处理 YES/NO 代币的特殊逻辑
 
         Returns:
@@ -169,7 +170,7 @@ class BaseStrategy(Strategy):
         """
         获取订单簿
 
-        ✅ 使用 Cache，不自己维护
+        [OK] 使用 Cache，不自己维护
 
         Returns:
             OrderBook | None
@@ -206,25 +207,27 @@ class BaseStrategy(Strategy):
         Returns:
             bool: 是否可以提交
         """
-        # 检查最大持仓数
-        positions = self.cache.positions_open(
-            instrument_id=self.instrument.id,
-            strategy_id=self.id
-        )
-
-        if len(positions) >= self.config.max_positions:
-            self.log.warning(f"已达最大持仓数: {self.config.max_positions}")
-            return False
-
-        # 检查最小余额
-        free_balance = self.get_free_balance()
-        min_balance = self.config.min_free_balance
-
-        if free_balance < min_balance:
-            self.log.warning(
-                f"可用余额不足: {free_balance} < {min_balance}"
+        # 检查最大持仓数（如果配置中有此属性）
+        if hasattr(self.config, 'max_positions'):
+            positions = self.cache.positions_open(
+                instrument_id=self.instrument.id,
+                strategy_id=self.id
             )
-            return False
+
+            if len(positions) >= self.config.max_positions:
+                self.log.warning(f"已达最大持仓数: {self.config.max_positions}")
+                return False
+
+        # 检查最小余额（如果配置中有此属性）
+        if hasattr(self.config, 'min_free_balance'):
+            free_balance = self.get_free_balance()
+            min_balance = self.config.min_free_balance
+
+            if free_balance < min_balance:
+                self.log.warning(
+                    f"可用余额不足: {free_balance} < {min_balance}"
+                )
+                return False
 
         return True
 
@@ -239,10 +242,10 @@ class BaseStrategy(Strategy):
         """
         if self.can_submit_order(order):
             self.submit_order(order)
-            self.log.info(f"✅ 订单已提交: {order.client_order_id}")
+            self.log.info(f"[OK] 订单已提交: {order.client_order_id}")
         else:
             self.log.warning(
-                f"❌ 订单未通过额外检查: {order.client_order_id}"
+                f"[X] 订单未通过额外检查: {order.client_order_id}"
             )
 
     def submit_market_order(self, side, quantity):
@@ -309,7 +312,7 @@ class BaseStrategy(Strategy):
         )
 
         self.submit_order_list(order_list)
-        self.log.info(f"✅ OCO 订单已提交: {order_list.order_list_id}")
+        self.log.info(f"[OK] OCO 订单已提交: {order_list.order_list_id}")
 
     # ========== 事件处理 ==========
 
@@ -337,7 +340,7 @@ class BaseStrategy(Strategy):
         self.log.error(
             f"\n"
             f"{'='*60}\n"
-            f"❌ 订单被拒绝\n"
+            f"[X] 订单被拒绝\n"
             f"{'='*60}\n"
             f"订单ID: {event.client_order_id}\n"
             f"拒绝原因: {event.reason}\n"
@@ -346,21 +349,21 @@ class BaseStrategy(Strategy):
 
         # 分析拒绝原因
         if "insufficient" in event.reason.lower():
-            self.log.error("💰 余额不足，请充值")
+            self.log.error("[$] 余额不足，请充值")
 
         elif "price" in event.reason.lower():
-            self.log.error("📊 价格无效，检查价格设置")
+            self.log.error("[CHART] 价格无效，检查价格设置")
 
         elif "quantity" in event.reason.lower():
-            self.log.error("📊 数量无效，检查数量设置")
+            self.log.error("[CHART] 数量无效，检查数量设置")
 
         elif "throttle" in event.reason.lower():
-            self.log.error("⏱️ 订单速率过快，等待后重试")
+            self.log.error("[TIME] 订单速率过快，等待后重试")
 
     def on_order_canceled(self, event):
         """订单取消时调用"""
         self.log.info(
-            f"🚫 订单取消: {event.client_order_id}, "
+            f"[STOP] 订单取消: {event.client_order_id}, "
             f"取消数量: {event.rejected_qty}"
         )
 
@@ -376,7 +379,7 @@ class BaseStrategy(Strategy):
         self.log.info(
             f"\n"
             f"{'='*60}\n"
-            f"💰 账户摘要\n"
+            f"[$] 账户摘要\n"
             f"{'='*60}\n"
             f"总余额: {account_info['total_balance']}\n"
             f"可用余额: {account_info['free_balance']}\n"
@@ -391,13 +394,13 @@ class BaseStrategy(Strategy):
         position = self.get_current_position()
 
         if not position:
-            self.log.info("📊 当前无仓位")
+            self.log.info("[CHART] 当前无仓位")
             return
 
         self.log.info(
             f"\n"
             f"{'='*60}\n"
-            f"📊 仓位摘要\n"
+            f"[CHART] 仓位摘要\n"
             f"{'='*60}\n"
             f"方向: {position['side']}\n"
             f"数量: {position['quantity']}\n"

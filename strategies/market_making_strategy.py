@@ -372,7 +372,7 @@ class MarketMakingStrategy(BaseStrategy):
         if not account:
             return False
 
-        free_balance = account['free_balance'].amount
+        free_balance = account['free_balance'].as_decimal()
 
         position = self.get_current_position()
         if not position:
@@ -396,7 +396,7 @@ class MarketMakingStrategy(BaseStrategy):
         if not account:
             return True
 
-        total_pnl = account['realized_pnl'].amount + account['unrealized_pnl'].amount
+        total_pnl = account['realized_pnl'].as_decimal() + account['unrealized_pnl'].as_decimal()
 
         if total_pnl < self.max_daily_loss:
             self.log.warning(
@@ -457,5 +457,5 @@ class MarketMakingStrategy(BaseStrategy):
         # 记录初始余额
         account = self.get_account_info()
         if account:
-            self._daily_start_balance = account['total_balance'].amount
-            self._daily_start_pnl = account['realized_pnl'].amount
+            self._daily_start_balance = account['total_balance'].as_decimal()
+            self._daily_start_pnl = account['realized_pnl'].as_decimal()
