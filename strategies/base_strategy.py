@@ -103,8 +103,7 @@ class BaseStrategy(Strategy):
         Returns:
             dict | None: 仓位信息字典，如果无仓位返回 None
         """
-        portfolio = self.cache.portfolio()
-        position = portfolio.position(self.instrument_id)
+        position = self.portfolio.position(self.instrument_id)
 
         if not position:
             return None
@@ -159,9 +158,8 @@ class BaseStrategy(Strategy):
         locked_balance = Money(account.balance_locked(currency), currency)
 
         # 从 Portfolio 获取 PnL 信息（返回 dict[Currency, Money]）
-        portfolio = self.cache.portfolio()
-        realized_pnls_dict = portfolio.realized_pnls(Venue("POLYMARKET"))
-        unrealized_pnls_dict = portfolio.unrealized_pnls(Venue("POLYMARKET"))
+        realized_pnls_dict = self.portfolio.realized_pnls(Venue("POLYMARKET"))
+        unrealized_pnls_dict = self.portfolio.unrealized_pnls(Venue("POLYMARKET"))
 
         # 提取对应货币的 PnL（如果存在，否则返回 0）
         realized_pnl = realized_pnls_dict.get(currency, Money(0, currency))
