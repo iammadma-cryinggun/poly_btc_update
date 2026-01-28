@@ -139,8 +139,7 @@ class BaseStrategy(Strategy):
         """
         获取账户信息
 
-        [OK] 使用 BettingAccount，不自己计算盈亏
-        BettingAccount 自动处理 YES/NO 代币的特殊逻辑
+        [OK] 使用 Portfolio 系统，不自己维护 paper_position
 
         Returns:
             dict: 账户信息字典
@@ -154,12 +153,26 @@ class BaseStrategy(Strategy):
         # 获取基础货币
         currency = account.base_currency
 
+        # 从 Account 获取余额信息
+        total_balance = Money(account.balance_total(currency), currency)
+        free_balance = Money(account.balance_free(currency), currency)
+        locked_balance = Money(account.balance_locked(currency), currency)
+
+        # 从 Portfolio 获取 PnL 信息（返回 dict[Currency, Money]）
+        portfolio = self.cache.portfolio()
+        realized_pnls_dict = portfolio.realized_pnls(Venue("POLYMARKET"))
+        unrealized_pnls_dict = portfolio.unrealized_pnls(Venue("POLYMARKET"))
+
+        # 提取对应货币的 PnL（如果存在，否则返回 0）
+        realized_pnl = realized_pnls_dict.get(currency, Money(0, currency))
+        unrealized_pnl = unrealized_pnls_dict.get(currency, Money(0, currency))
+
         return {
-            'total_balance': Money(account.balance_total(currency), currency),
-            'free_balance': Money(account.balance_free(currency), currency),
-            'locked_balance': Money(account.balance_locked(currency), currency),
-            'realized_pnl': Money(account.realized_pnl(), currency),
-            'unrealized_pnl': Money(account.unrealized_pnl(), currency),
+            'total_balance': total_balance,
+            'free_balance': free_balance,
+            'locked_balance': locked_balance,
+            'realized_pnl': realized_pnl,
+            'unrealized_pnl': unrealized_pnl,
         }
 
     def get_free_balance(self):
