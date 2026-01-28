@@ -151,12 +151,15 @@ class BaseStrategy(Strategy):
             self.log.error("账户未找到")
             return None
 
+        # 获取基础货币
+        currency = account.base_currency
+
         return {
-            'total_balance': Money(account.balance_total(), account.currency),
-            'free_balance': Money(account.balance_free(), account.currency),
-            'locked_balance': Money(account.balance_locked(), account.currency),
-            'realized_pnl': Money(account.realized_pnl(), account.currency),
-            'unrealized_pnl': Money(account.unrealized_pnl(), account.currency),
+            'total_balance': Money(account.balance_total(currency), currency),
+            'free_balance': Money(account.balance_free(currency), currency),
+            'locked_balance': Money(account.balance_locked(currency), currency),
+            'realized_pnl': Money(account.realized_pnl(), currency),
+            'unrealized_pnl': Money(account.unrealized_pnl(), currency),
         }
 
     def get_free_balance(self):
