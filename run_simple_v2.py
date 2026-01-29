@@ -34,6 +34,39 @@ def load_env():
     return private_key
 
 
+def generate_api_credentials(private_key: str):
+    """生成 API 凭证并设置环境变量"""
+    try:
+        from py_clob_client.constants import POLYMARKET_API_URL
+        from py_clob_client.client import ClobClient
+
+        # 创建客户端
+        client = ClobClient(
+            POLYMARKET_API_URL,
+            key=str(private_key),
+            signature_type=2,  # Magic Wallet
+        )
+
+        # 生成或获取 API 凭证
+        api_creds = client.create_or_derive_api_creds()
+
+        if api_creds:
+            # 设置到环境变量
+            os.environ['POLYMARKET_API_KEY'] = api_creds.get('apiKey', '')
+            os.environ['POLYMARKET_API_SECRET'] = api_creds.get('apiSecret', '')
+            os.environ['POLYMARKET_PASSPHRASE'] = api_creds.get('passphrase', '')
+
+            print(f"[OK] API 凭证已生成")
+            return True
+        else:
+            print("[WARN] 无法生成 API 凭证")
+            return False
+
+    except Exception as e:
+        print(f"[ERROR] API 凭证生成失败: {e}")
+        return False
+
+
 def get_market_info(slug: str):
     """从 Gamma API 获取市场信息"""
     url = f"https://gamma-api.polymarket.com/markets/slug/{slug}"
@@ -74,7 +107,13 @@ def main():
 
     print(f"\n[OK] 私钥已加载: {private_key[:10]}...{private_key[-6:]}")
 
-    # 2. 获取市场信息
+    # 2. 生成 API 凭证（必需！）
+    print("\n[INFO] 生成 API 凭证...")
+    if not generate_api_credentials(private_key):
+        print("\n[ERROR] 无法生成 API 凭证，程序退出")
+        return 1
+
+    # 3. 获取市场信息
     slug = "bitcoin-up-or-down-on-january-29"
     print(f"\n[INFO] 目标市场: {slug}")
     print(f"[INFO] URL: https://polymarket.com/event/{slug}")
@@ -94,7 +133,7 @@ def main():
         question = "BTC market (fallback)"
         print("[WARN] 这可能不是最新的市场")
 
-    # 3. 导入并启动
+    # 4. 导入并启动
     print("\n[INFO] 导入 NautilusTrader...")
 
     try:
