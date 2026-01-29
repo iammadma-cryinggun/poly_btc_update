@@ -122,6 +122,48 @@ def get_market_info(slug: str):
         return None
 
 
+def get_latest_15m_btc_market():
+    """自动查找最新的15分钟BTC市场"""
+    try:
+        # 搜索所有包含 "btc-updown-15m" 的市场
+        url = "https://gamma-api.polymarket.com/markets"
+        params = {
+            "query": "btc-updown-15m",
+            "limit": 20,
+            "closing_status": "open",  # 只查未关闭的市场
+        }
+
+        response = requests.get(url, params=params, timeout=10)
+        response.raise_for_status()
+
+        markets = response.json()
+
+        if not markets:
+            raise ValueError("未找到15分钟BTC市场")
+
+        # 按开始时间排序，取最新的
+        markets.sort(key=lambda m: m.get('startTime', 0), reverse=True)
+        latest_market = markets[0]
+
+        slug = latest_market.get('slug', '')
+        condition_id = latest_market.get('conditionId')
+        token_ids = json.loads(latest_market.get('clobTokenIds', '[]'))
+        token_id = token_ids[0] if token_ids else None
+        question = latest_market.get('question', 'BTC 15m Market')
+
+        if not all([condition_id, token_id, slug]):
+            raise ValueError("市场信息不完整")
+
+        print(f"[OK] 找到最新市场: {slug}")
+        print(f"[INFO] URL: https://polymarket.com/event/{slug}")
+
+        return condition_id, token_id, question, slug
+
+    except Exception as e:
+        print(f"[WARN] 自动查找失败: {str(e)[:80]}")
+        return None
+
+
 def main():
     """主函数 - 15分钟市场做市"""
     print("=" * 80)
@@ -144,22 +186,19 @@ def main():
         print("\n[ERROR] API 凭证获取失败，程序退出")
         return 1
 
-    # 3. 获取市场信息（15分钟市场）
-    slug = "btc-updown-15m-1769689800"  # 15分钟BTC市场
-    print(f"\n[INFO] 目标市场: {slug}")
-    print(f"[INFO] URL: https://polymarket.com/event/{slug}")
+    # 3. 获取市场信息（自动查找最新的15分钟市场）
+    print("\n[INFO] 自动查找最新的15分钟BTC市场...")
 
-    market_info = get_market_info(slug)
+    market_info = get_latest_15m_btc_market()
 
     if market_info:
-        condition_id, token_id, question = market_info
+        condition_id, token_id, question, slug = market_info
         print(f"[OK] 成功获取市场信息")
         print(f"    Question: {question[:80]}...")
     else:
-        print("\n[INFO] 使用备用市场配置...")
-        condition_id = "0xe0b7a1ce4f6e211dcf7cd02cfe36f9dc374968510baa7f8e40919c9dca642ae8"
-        token_id = "50164777809036667758693066076712603672701101684119148869469668706170865082333"
-        question = "BTC 15m market (fallback)"
+        print("\n[ERROR] 无法找到15分钟BTC市场")
+        print("[INFO] 请稍后重试，或者检查 Polymarket 是否有15分钟BTC市场")
+        return 1
 
     # 4. 导入并启动
     print("\n[INFO] 导入 NautilusTrader...")
