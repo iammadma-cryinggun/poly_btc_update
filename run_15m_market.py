@@ -48,54 +48,11 @@ def load_env():
 
 
 def ensure_api_credentials(private_key: str):
-    """确保 API 凭证存在（优先使用环境变量，否则自动生成）"""
-    # 先检查是否已配置
-    api_key = os.getenv('POLYMARKET_API_KEY')
-    api_secret = os.getenv('POLYMARKET_API_SECRET')
-    passphrase = os.getenv('POLYMARKET_PASSPHRASE')
-
-    if all([api_key, api_secret, passphrase]):
-        print(f"[OK] API 凭证已配置")
-        print(f"[DEBUG] API Key: {api_key[:10]}...")
-        return True
-
-    # 未配置，自动生成
-    print("[INFO] API 凭证未配置，正在自动生成...")
-    try:
-        from py_clob_client.client import ClobClient
-
-        POLYMARKET_API_URL = "https://clob.polymarket.com"
-        POLYMARKET_CHAIN_ID = 137  # Polygon chain ID
-
-        print(f"[DEBUG] 创建 ClobClient...")
-        client = ClobClient(
-            POLYMARKET_API_URL,
-            key=str(private_key),
-            signature_type=2,  # Magic Wallet
-            chain_id=POLYMARKET_CHAIN_ID,
-        )
-
-        print(f"[DEBUG] 调用 create_or_derive_api_creds...")
-        api_creds = client.create_or_derive_api_creds()
-
-        if api_creds:
-            # ApiCreds 是对象，不是字典
-            os.environ['POLYMARKET_API_KEY'] = getattr(api_creds, 'apiKey', '')
-            os.environ['POLYMARKET_API_SECRET'] = getattr(api_creds, 'apiSecret', '')
-            os.environ['POLYMARKET_PASSPHRASE'] = getattr(api_creds, 'passphrase', '')
-
-            print(f"[OK] API 凭证已生成")
-            print(f"[DEBUG] API Key: {os.environ['POLYMARKET_API_KEY'][:10]}...")
-            return True
-        else:
-            print("[ERROR] 无法生成 API 凭证")
-            return False
-
-    except Exception as e:
-        import traceback
-        print(f"[ERROR] API 凭证生成失败: {e}")
-        print(f"[ERROR] 详细错误: {traceback.format_exc()[:500]}")
-        return False
+    """确保 API 凭证存在（Magic Wallet 不需要预生成 API 凭证）"""
+    # Magic Wallet (signature_type=2) 直接使用私钥签名
+    # 不需要预先生成 API 凭证
+    print(f"[INFO] Magic Wallet 模式：使用私钥直接签名")
+    return True
 
 
 def get_market_info(slug: str):
@@ -277,14 +234,14 @@ def main():
                     private_key=private_key,
                     signature_type=2,  # Magic Wallet
                     instrument_provider=InstrumentProviderConfig(
-                        load_ids=frozenset([str(instrument_id)])
+                        load_all=True,  # 加载所有市场
                     ),
                 ),
             },
             exec_clients={
                 POLYMARKET: PolymarketExecClientConfig(
                     private_key=private_key,
-                    signature_type=2,
+                    signature_type=2,  # Magic Wallet
                 ),
             },
             logging=LoggingConfig(log_level="INFO"),
