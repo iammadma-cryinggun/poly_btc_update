@@ -19,5 +19,5 @@ ENV PYTHONUNBUFFERED=1
 ENV PYTHONIOENCODING=utf-8
 
 # 启动15分钟市场策略（基于论文优化）
-# 重定向 stdout 和 stderr 到日志文件
-CMD ["sh", "-c", "python run_15m_market.py 2>&1 | tee /dev/stderr"]
+# 将所有输出重定向到文件和stderr，确保日志被捕获
+CMD ["sh", "-c", "python -u run_15m_market.py > /tmp/app.log 2>&1 && cat /tmp/app.log"]

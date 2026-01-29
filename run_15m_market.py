@@ -35,52 +35,54 @@ def load_env():
     return private_key
 
 
-def generate_api_credentials(private_key: str):
-    """生成 API 凭证并设置环境变量"""
+def ensure_api_credentials(private_key: str):
+    """确保 API 凭证存在（优先使用环境变量，否则自动生成）"""
+    # 先检查是否已配置
+    api_key = os.getenv('POLYMARKET_API_KEY')
+    api_secret = os.getenv('POLYMARKET_API_SECRET')
+    passphrase = os.getenv('POLYMARKET_PASSPHRASE')
+
+    if all([api_key, api_secret, passphrase]):
+        print(f"[OK] API 凭证已配置")
+        print(f"[DEBUG] API Key: {api_key[:10]}...")
+        return True
+
+    # 未配置，自动生成
+    print("[INFO] API 凭证未配置，正在自动生成...")
     try:
         from py_clob_client.client import ClobClient
 
-        # Polymarket API URL
         POLYMARKET_API_URL = "https://clob.polymarket.com"
         POLYMARKET_CHAIN_ID = 137  # Polygon chain ID
 
         print(f"[DEBUG] 创建 ClobClient...")
-        print(f"[DEBUG] API URL: {POLYMARKET_API_URL}")
-        print(f"[DEBUG] Chain ID: {POLYMARKET_CHAIN_ID}")
-        print(f"[DEBUG] Private key: {private_key[:10]}...{private_key[-6:]}")
-
-        # 创建客户端（需要 chain_id）
         client = ClobClient(
             POLYMARKET_API_URL,
             key=str(private_key),
             signature_type=2,  # Magic Wallet
-            chain_id=POLYMARKET_CHAIN_ID,  # Polygon chain ID
+            chain_id=POLYMARKET_CHAIN_ID,
         )
 
         print(f"[DEBUG] 调用 create_or_derive_api_creds...")
-
-        # 生成或获取 API 凭证
         api_creds = client.create_or_derive_api_creds()
 
-        print(f"[DEBUG] API 凭证返回: {type(api_creds)}")
-
         if api_creds:
-            # 设置到环境变量
-            os.environ['POLYMARKET_API_KEY'] = api_creds.get('apiKey', '')
-            os.environ['POLYMARKET_API_SECRET'] = api_creds.get('apiSecret', '')
-            os.environ['POLYMARKET_PASSPHRASE'] = api_creds.get('passphrase', '')
+            # ApiCreds 是对象，不是字典
+            os.environ['POLYMARKET_API_KEY'] = getattr(api_creds, 'apiKey', '')
+            os.environ['POLYMARKET_API_SECRET'] = getattr(api_creds, 'apiSecret', '')
+            os.environ['POLYMARKET_PASSPHRASE'] = getattr(api_creds, 'passphrase', '')
 
             print(f"[OK] API 凭证已生成")
             print(f"[DEBUG] API Key: {os.environ['POLYMARKET_API_KEY'][:10]}...")
             return True
         else:
-            print("[WARN] 无法生成 API 凭证")
+            print("[ERROR] 无法生成 API 凭证")
             return False
 
     except Exception as e:
         import traceback
         print(f"[ERROR] API 凭证生成失败: {e}")
-        print(f"[ERROR] 详细错误: {traceback.format_exc()}")
+        print(f"[ERROR] 详细错误: {traceback.format_exc()[:500]}")
         return False
 
 
@@ -124,10 +126,10 @@ def main():
 
     print(f"\n[OK] 私钥已加载: {private_key[:10]}...{private_key[-6:]}")
 
-    # 2. 生成 API 凭证（必需！）
-    print("\n[INFO] 生成 API 凭证...")
-    if not generate_api_credentials(private_key):
-        print("\n[ERROR] 无法生成 API 凭证，程序退出")
+    # 2. 确保 API 凭证存在（自动生成如果未配置）
+    print("\n[INFO] 检查 API 凭证...")
+    if not ensure_api_credentials(private_key):
+        print("\n[ERROR] API 凭证获取失败，程序退出")
         return 1
 
     # 3. 获取市场信息（15分钟市场）

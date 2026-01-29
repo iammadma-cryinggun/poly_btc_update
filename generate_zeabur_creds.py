@@ -58,9 +58,10 @@ def main():
         api_creds = client.create_or_derive_api_creds()
 
         if api_creds:
-            api_key = api_creds.get('apiKey', '')
-            api_secret = api_creds.get('apiSecret', '')
-            passphrase = api_creds.get('passphrase', '')
+            # ApiCreds 是对象，不是字典
+            api_key = getattr(api_creds, 'apiKey', '')
+            api_secret = getattr(api_creds, 'apiSecret', '')
+            passphrase = getattr(api_creds, 'passphrase', '')
 
             print("\n" + "=" * 80)
             print("✅ API 凭证生成成功！")
