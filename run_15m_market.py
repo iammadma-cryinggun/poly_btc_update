@@ -286,7 +286,8 @@ def main():
                     private_key=private_key,
                     signature_type=2,  # Magic Wallet
                     instrument_provider=InstrumentProviderConfig(
-                        load_ids=load_ids,  # 使用准备好的 load_ids
+                        load_all=True,  # 加载所有市场（虽然慢但至少能工作）
+                        log_warnings=False,  # 关闭警告减少日志
                     ),
                 ),
             },
@@ -296,7 +297,7 @@ def main():
                     signature_type=2,  # Magic Wallet
                 ),
             },
-            logging=LoggingConfig(log_level="INFO"),
+            logging=LoggingConfig(log_level="WARNING"),  # 减少日志噪音
         )
 
         node = TradingNode(config=node_config)
