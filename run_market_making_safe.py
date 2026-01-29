@@ -24,11 +24,22 @@ sys.path.insert(0, str(project_root))
 
 
 def load_env():
-    """加载私钥 - 优先使用环境变量（Zeabur）"""
+    """加载环境变量 - 优先使用环境变量（Zeabur）"""
+    env_vars = {
+        'private_key': None,
+        'api_key': None,
+        'api_secret': None,
+        'passphrase': None,
+    }
+
     # 1. 优先从环境变量读取（Zeabur）
-    private_key = os.getenv("POLYMARKET_PK")
-    if private_key:
-        return private_key
+    env_vars['private_key'] = os.getenv("POLYMARKET_PK")
+    env_vars['api_key'] = os.getenv("POLYMARKET_API_KEY")
+    env_vars['api_secret'] = os.getenv("POLYMARKET_API_SECRET")
+    env_vars['passphrase'] = os.getenv("POLYMARKET_PASSPHRASE")
+
+    if env_vars['private_key']:
+        return env_vars
 
     # 2. 尝试从 .env 文件读取（本地开发）
     env_file = project_root / ".env"
@@ -38,10 +49,18 @@ def load_env():
                 line = line.strip()
                 if line and not line.startswith('#') and '=' in line:
                     key, value = line.split('=', 1)
-                    if key.strip() == "POLYMARKET_PK":
-                        return value.strip()
+                    key = key.strip()
+                    value = value.strip()
+                    if key == "POLYMARKET_PK":
+                        env_vars['private_key'] = value
+                    elif key == "POLYMARKET_API_KEY":
+                        env_vars['api_key'] = value
+                    elif key == "POLYMARKET_API_SECRET":
+                        env_vars['api_secret'] = value
+                    elif key == "POLYMARKET_PASSPHRASE":
+                        env_vars['passphrase'] = value
 
-    return None
+    return env_vars
 
 
 def get_market_info(slug: str):
@@ -86,12 +105,21 @@ def main():
     print("=" * 80)
 
     # 加载环境变量
-    private_key = load_env()
-    if not private_key:
+    env_vars = load_env()
+    if not env_vars['private_key']:
         print("[ERROR] 未找到私钥！请在 .env 文件中配置 POLYMARKET_PK")
         return 1
 
+    private_key = env_vars['private_key']
+    api_key = env_vars['api_key']
+    api_secret = env_vars['api_secret']
+    passphrase = env_vars['passphrase']
+
     print(f"\n[OK] 私钥已加载: {private_key[:10]}...{private_key[-6:]}")
+    if api_key:
+        print(f"[OK] API Key: {api_key}")
+    else:
+        print("[WARN] 未找到 API Key - 将使用 L1 认证（交易功能受限）")
 
     # 目标市场
     target_slug = "bitcoin-up-or-down-on-january-28"
@@ -220,6 +248,9 @@ def main():
     exec_client_config = PolymarketExecClientConfig(
         private_key=private_key,
         signature_type=2,  # 邮箱/Magic 用户使用 type 2
+        api_key=api_key or "",
+        api_secret=api_secret or "",
+        passphrase=passphrase or "",
     )
 
     # 创建日志配置
