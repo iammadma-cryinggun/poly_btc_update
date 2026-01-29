@@ -31,23 +31,6 @@ ls -la /app
 echo "[INFO] Checking requirements.txt:"
 head -20 /app/requirements.txt
 
-# 检查诊断脚本是否存在（优先运行诊断）
-if [ -f "/app/debug_scan.py" ]; then
-    echo "[INFO] Running diagnostic script debug_scan.py..."
-    echo "========================================"
-    python -u /app/debug_scan.py 2>&1
-    EXIT_CODE=$?
-
-    echo "========================================"
-    echo "[INFO] Diagnostic script exited with code: $EXIT_CODE"
-    echo "========================================"
-
-    # 诊断完成后休眠60秒方便查看日志
-    echo "[INFO] Keeping container alive for 60 seconds to view logs..."
-    sleep 60
-    exit $EXIT_CODE
-fi
-
 # 检查主脚本是否存在
 if [ ! -f "/app/run_15m_market.py" ]; then
     echo "[ERROR] run_15m_market.py not found!"

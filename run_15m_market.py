@@ -122,190 +122,128 @@ def get_market_info(slug: str):
         return None
 
 
-def get_latest_15m_btc_market():
-    """使用时间差逻辑查找最新的 15分钟 BTC 市场（健壮版）"""
+def get_next_15m_timestamp():
+    """
+    计算下一个 15分钟结算点 (00, 15, 30, 45) 的 Unix 时间戳
+    """
     from datetime import datetime, timezone, timedelta
-    import dateutil.parser
+    import math
+
+    now = datetime.now(timezone.utc)
+
+    # 将当前分钟向上取整到下一个 15 的倍数
+    minutes = now.minute
+    next_quarter = math.ceil((minutes + 1) / 15) * 15
+
+    # 如果正好跨小时 (比如现在是 55分，下一个是 60分即下一小时的00分)
+    if next_quarter == 60:
+        # 加1小时，分钟归0
+        target_time = (now + timedelta(hours=1)).replace(minute=0, second=0, microsecond=0)
+    else:
+        # 保持当前小时，分钟设为 next_quarter
+        target_time = now.replace(minute=next_quarter, second=0, microsecond=0)
+
+    # 返回整数时间戳
+    return int(target_time.timestamp())
+
+
+def get_latest_15m_btc_market():
+    """使用时间戳直接定位 15分钟 BTC 市场（作弊码方法）"""
+    from datetime import datetime, timezone, timedelta
+
+    print("=" * 80)
+    print("Market Discovery via Timestamp (Direct Method)")
+    print("=" * 80)
+
+    # 1. 计算目标时间戳
+    target_ts = get_next_15m_timestamp()
+    target_time = datetime.fromtimestamp(target_ts, tz=timezone.utc)
+
+    print(f"[INFO] Current Time (UTC): {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"[INFO] Target Time (UTC): {target_time.strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"[INFO] Target Timestamp: {target_ts}")
+
+    # 2. 构造 Slug
+    slug = f"btc-updown-15m-{target_ts}"
+    print(f"[INFO] Constructed Slug: {slug}")
+    print(f"[INFO] Market URL: https://polymarket.com/event/{slug}")
+    print(f"=" * 80)
+
+    # 3. 直接查询 API (使用 slug 参数)
+    print(f"\n[INFO] Querying Gamma API...")
 
     try:
-        # 使用 Gamma API 的 events 端点
-        url = "https://gamma-api.polymarket.com/events"
-        params = {
-            "closed": "false",      # 只看活跃市场
-            "tags": "Bitcoin",      # 标签过滤
-            "limit": 20,            # 获取最近的市场
-            "order": "endDate:asc"  # 按结束时间升序排列
-        }
+        # 使用 /markets/slug/{slug} 端点
+        url = f"https://gamma-api.polymarket.com/markets/slug/{slug}"
 
-        # 打印容器当前时间，检查时间漂移
-        now = datetime.now(timezone.utc)
-        print(f"[SYSTEM] 容器当前时间 (UTC): {now.strftime('%Y-%m-%d %H:%M:%S')}")
-        print(f"[INFO] 查询 Gamma API events...")
+        response = requests.get(url, timeout=10)
 
-        response = requests.get(url, params=params, timeout=10)
+        if response.status_code == 404:
+            print(f"[WARN] Market not found (404)")
+            print(f"[INFO] Possible reasons:")
+            print(f"  1. Market not yet created (usually created 1-2 hours in advance)")
+            print(f"  2. Current time is in a gap period")
+
+            # 尝试下一个时间点
+            print(f"\n[INFO] Trying next 15-minute slot (+15min)...")
+            next_ts = target_ts + 900  # 加 15 分钟 (900 秒)
+            next_slug = f"btc-updown-15m-{next_ts}"
+            print(f"[INFO] Next Slug: {next_slug}")
+            print(f"[INFO] Next Time: {datetime.fromtimestamp(next_ts, tz=timezone.utc).strftime('%Y-%m-%d %H:%M:%S')} UTC")
+
+            url = f"https://gamma-api.polymarket.com/markets/slug/{next_slug}"
+            response = requests.get(url, timeout=10)
+
+            if response.status_code == 404:
+                print(f"[ERROR] Next market also not found")
+                return None
+
         response.raise_for_status()
-        events = response.json()
+        market = response.json()
 
-        if not events:
-            print("[WARN] API 返回空列表，可能是网络问题或API维护")
-            return None
+        print(f"\n[OK] Successfully found market!")
+        print(f"[INFO] Question: {market.get('question')}")
+        print(f"[INFO] End Date: {market.get('endDate')}")
 
-        print(f"[OK] 找到 {len(events)} 个活跃 BTC 市场")
-
-        # 放宽时间窗口：1分钟 到 60分钟（避免市场真空期崩溃）
-        MIN_SECONDS = 60     # 1 分钟
-        MAX_SECONDS = 3600   # 60 分钟
-
-        print(f"[INFO] 时间窗口: {MIN_SECONDS/60:.0f}-{MAX_SECONDS/60:.0f} 分钟")
-        print(f"[DEBUG] 正在分析最近的 5 个市场:")
-        print(f"[INFO] 查找目标: 'Bitcoin >' 开头的行权价格市场")
-
-        candidates = []
-
-        # 收集所有 "Bitcoin >" 市场（用于价格排序）
-        all_strike_markets = []
-
-        # 遍历所有市场，详细打印前5个
-        for i, event in enumerate(events[:5]):
-            title = event.get('title', 'No Title')
-            end_date_str = event.get('endDate')
-
-            if not end_date_str:
-                continue
-
-            end_date = dateutil.parser.isoparse(end_date_str)
-            diff_seconds = (end_date - now).total_seconds()
-            diff_minutes = diff_seconds / 60
-
-            print(f"  {i+1}. {title[:60]}")
-            print(f"     -> 结束时间: {end_date.strftime('%H:%M:%S')} | 剩余: {diff_minutes:.2f} 分钟")
-
-            # 筛选逻辑：必须是 "Bitcoin >" 开头（行权价格市场）且 在时间窗口内
-            if "Bitcoin >" in title and MIN_SECONDS < diff_seconds < MAX_SECONDS:
-                # 尝试提取价格（例如从 "Bitcoin > $102,500 on Jan 29?" 中提取 102500）
-                import re
-                price_match = re.search(r'\$([0-9,]+)', title)
-                price = int(price_match.group(1).replace(',', '')) if price_match else 0
-
-                candidates.append({
-                    "title": title,
-                    "diff": diff_seconds,
-                    "event": event,
-                    "price": price
-                })
-
-                all_strike_markets.append({
-                    "title": title,
-                    "diff": diff_seconds,
-                    "event": event,
-                    "price": price
-                })
-
-        # 如果没有找到符合窗口的市场，打印所有市场信息
-        if not candidates:
-            print(f"\n[WARN] 未找到符合时间窗口 ({MIN_SECONDS/60:.0f}-{MAX_SECONDS/60:.0f}分钟) 的市场")
-            print(f"[DEBUG] 正在打印所有返回的市场信息:")
-
-            all_valid = []
-            for event in events:
-                title = event.get('title', '')
-                end_date_str = event.get('endDate')
-                if not end_date_str:
-                    continue
-
-                end_date = dateutil.parser.isoparse(end_date_str)
-                diff_seconds = (end_date - now).total_seconds()
-
-                # 收集所有未来的 "Bitcoin >" 行权价格市场
-                if "Bitcoin >" in title and diff_seconds > 0:
-                    # 提取价格
-                    import re
-                    price_match = re.search(r'\$([0-9,]+)', title)
-                    price = int(price_match.group(1).replace(',', '')) if price_match else 0
-
-                    all_valid.append({
-                        "title": title,
-                        "diff": diff_seconds,
-                        "event": event,
-                        "price": price
-                    })
-
-            if not all_valid:
-                print("[ERROR] 没有任何未来的 'Bitcoin >' 行权价格市场")
-                print("[INFO] 注意：前端显示的 'Bitcoin Up or Down' 是 UI 聚合名称")
-                print("[INFO] API 里实际存储的是 'Bitcoin > $XXX' 这样的行权价格市场")
-                return None
-
-            # 找到最近的一个（即使是短于1分钟的）
-            best = all_valid[0]
-            print(f"\n[INFO] 最近的有效市场:")
-            print(f"  标题: {best['title']}")
-            print(f"  行权价格: ${best['price']:,}" if best['price'] > 0 else "")
-            print(f"  剩余时间: {best['diff']/60:.2f} 分钟")
-
-            # 如果剩余时间太短，给出警告
-            if best['diff'] < 60:
-                print("[WARN] 该市场将在 1 分钟内结束，属于超短线！")
-                print("[WARN] 建议等待下一个市场")
-                return None
-
-            candidates.append(best)
-
-        # 选择最佳市场（优先选择价格居中的市场 - At-The-Money）
-        if len(candidates) > 1:
-            # 按价格排序
-            candidates_sorted_by_price = sorted(candidates, key=lambda x: x['price'])
-            # 选择价格居中的（平值期权流动性最好）
-            middle_index = len(candidates_sorted_by_price) // 2
-            best_match = candidates_sorted_by_price[middle_index]
-
-            print(f"[INFO] 找到 {len(candidates)} 个符合时间窗口的市场")
-            print(f"[INFO] 按行权价格排序，选择平值期权（价格居中）")
-            print(f"[DEBUG] 价格范围: ${candidates_sorted_by_price[0]['price']:,} - ${candidates_sorted_by_price[-1]['price']:,}")
-        else:
-            best_match = candidates[0]
-
-        minutes_left = best_match['diff'] / 60
-
-        print(f"\n[OK] ✅ 锁定市场!")
-        print(f"[INFO] 标题: {best_match['title']}")
-        print(f"[INFO] 行权价格: ${best_match['price']:,}" if best_match['price'] > 0 else "")
-        print(f"[INFO] 剩余时间: {minutes_left:.2f} 分钟")
-
-        # 智能判断市场类型
-        if minutes_left < 5:
-            print("[WARN] 注意：该市场将在 5 分钟内结束，属于超短线！")
-        elif minutes_left > 30:
-            print("[WARN] 注意：这是一个长周期市场 (>30分钟)")
-        else:
-            print("[INFO] ✅ 这是一个标准的短周期市场 (5-30分钟)")
-
-        # 提取市场信息
-        markets = best_match['event'].get('markets', [])
-        if not markets:
-            print("[ERROR] Event 中没有市场数据")
-            return None
-
-        market = markets[0]
+        # 提取核心交易数据
         condition_id = market.get('conditionId')
         clob_token_ids_str = market.get('clobTokenIds', '[]')
         token_ids = json.loads(clob_token_ids_str)
-        slug = market.get('slug', '')
+        question = market.get('question', 'Market')
 
         if not all([condition_id, token_ids]):
-            print("[ERROR] 市场信息不完整")
+            print("[ERROR] Market data incomplete")
             return None
 
-        print(f"[INFO] URL: https://polymarket.com/event/{slug}")
-        print(f"[DEBUG] Condition ID: {condition_id}")
-        print(f"[DEBUG] Token ID: {token_ids[0]}")
+        print(f"[INFO] Condition ID: {condition_id}")
+        print(f"[INFO] Token IDs: {token_ids}")
+        print(f"[INFO] First Token ID: {token_ids[0]}")
 
-        return condition_id, token_ids[0], best_match['title'], slug
+        # 计算剩余时间
+        end_date_str = market.get('endDate')
+        if end_date_str:
+            import dateutil.parser
+            end_date = dateutil.parser.isoparse(end_date_str)
+            now = datetime.now(timezone.utc)
+            minutes_left = (end_date - now).total_seconds() / 60
+
+            print(f"[INFO] Time remaining: {minutes_left:.2f} minutes")
+
+            if minutes_left < 5:
+                print("[WARN] This market will end in less than 5 minutes!")
+            elif minutes_left > 30:
+                print("[WARN] This is a long-period market (>30min)")
+            else:
+                print("[INFO] Standard short-period market (5-30min)")
+
+        print(f"=" * 80)
+
+        return condition_id, token_ids[0], question, slug
 
     except Exception as e:
-        print(f"[FATAL] 查询失败: {str(e)}")
+        print(f"[ERROR] Failed to fetch market: {e}")
         import traceback
-        print(f"[DEBUG] 详细错误: {traceback.format_exc()[:800]}")
+        print(f"[DEBUG] Error details: {traceback.format_exc()[:800]}")
         return None
 
 
