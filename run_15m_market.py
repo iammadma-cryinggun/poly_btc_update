@@ -221,6 +221,9 @@ def main():
         instrument_id = get_polymarket_instrument_id(condition_id, token_id)
         print(f"[OK] Instrument ID: {instrument_id}")
 
+        # 验证 instrument_id 格式
+        print(f"[DEBUG] Instrument ID 格式: {instrument_id}")
+
         # 创建基于论文优化的预测市场做市策略配置
         class PredictionMarketConfig(StrategyConfig, frozen=True):
             instrument_id: str
@@ -277,7 +280,7 @@ def main():
                     private_key=private_key,
                     signature_type=2,  # Magic Wallet
                     instrument_provider=InstrumentProviderConfig(
-                        load_all=True,  # 加载所有市场
+                        load_ids=frozenset([str(instrument_id)]),  # 只加载我们需要的市场
                     ),
                 ),
             },
