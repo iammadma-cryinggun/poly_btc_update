@@ -158,8 +158,12 @@ def get_latest_15m_btc_market():
 
         print(f"[INFO] 时间窗口: {MIN_SECONDS/60:.0f}-{MAX_SECONDS/60:.0f} 分钟")
         print(f"[DEBUG] 正在分析最近的 5 个市场:")
+        print(f"[INFO] 查找目标: 'Bitcoin >' 开头的行权价格市场")
 
         candidates = []
+
+        # 收集所有 "Bitcoin >" 市场（用于价格排序）
+        all_strike_markets = []
 
         # 遍历所有市场，详细打印前5个
         for i, event in enumerate(events[:5]):
@@ -176,17 +180,30 @@ def get_latest_15m_btc_market():
             print(f"  {i+1}. {title[:60]}")
             print(f"     -> 结束时间: {end_date.strftime('%H:%M:%S')} | 剩余: {diff_minutes:.2f} 分钟")
 
-            # 筛选逻辑：必须是 Bitcoin 且 在时间窗口内
-            if "Bitcoin" in title and MIN_SECONDS < diff_seconds < MAX_SECONDS:
+            # 筛选逻辑：必须是 "Bitcoin >" 开头（行权价格市场）且 在时间窗口内
+            if "Bitcoin >" in title and MIN_SECONDS < diff_seconds < MAX_SECONDS:
+                # 尝试提取价格（例如从 "Bitcoin > $102,500 on Jan 29?" 中提取 102500）
+                import re
+                price_match = re.search(r'\$([0-9,]+)', title)
+                price = int(price_match.group(1).replace(',', '')) if price_match else 0
+
                 candidates.append({
                     "title": title,
                     "diff": diff_seconds,
-                    "event": event
+                    "event": event,
+                    "price": price
+                })
+
+                all_strike_markets.append({
+                    "title": title,
+                    "diff": diff_seconds,
+                    "event": event,
+                    "price": price
                 })
 
         # 如果没有找到符合窗口的市场，打印所有市场信息
         if not candidates:
-            print(f"\n[WARN] ⚠️ 未找到符合时间窗口 ({MIN_SECONDS/60:.0f}-{MAX_SECONDS/60:.0f}分钟) 的市场")
+            print(f"\n[WARN] 未找到符合时间窗口 ({MIN_SECONDS/60:.0f}-{MAX_SECONDS/60:.0f}分钟) 的市场")
             print(f"[DEBUG] 正在打印所有返回的市场信息:")
 
             all_valid = []
@@ -199,45 +216,67 @@ def get_latest_15m_btc_market():
                 end_date = dateutil.parser.isoparse(end_date_str)
                 diff_seconds = (end_date - now).total_seconds()
 
-                # 收集所有未来的 Bitcoin 市场
-                if "Bitcoin" in title and diff_seconds > 0:
+                # 收集所有未来的 "Bitcoin >" 行权价格市场
+                if "Bitcoin >" in title and diff_seconds > 0:
+                    # 提取价格
+                    import re
+                    price_match = re.search(r'\$([0-9,]+)', title)
+                    price = int(price_match.group(1).replace(',', '')) if price_match else 0
+
                     all_valid.append({
                         "title": title,
                         "diff": diff_seconds,
-                        "event": event
+                        "event": event,
+                        "price": price
                     })
 
             if not all_valid:
-                print("[ERROR] 没有任何未来的 Bitcoin 市场，所有市场都已过期")
+                print("[ERROR] 没有任何未来的 'Bitcoin >' 行权价格市场")
+                print("[INFO] 注意：前端显示的 'Bitcoin Up or Down' 是 UI 聚合名称")
+                print("[INFO] API 里实际存储的是 'Bitcoin > $XXX' 这样的行权价格市场")
                 return None
 
             # 找到最近的一个（即使是短于1分钟的）
             best = all_valid[0]
             print(f"\n[INFO] 最近的有效市场:")
             print(f"  标题: {best['title']}")
+            print(f"  行权价格: ${best['price']:,}" if best['price'] > 0 else "")
             print(f"  剩余时间: {best['diff']/60:.2f} 分钟")
 
             # 如果剩余时间太短，给出警告
             if best['diff'] < 60:
-                print("[WARN] ⚠️ 该市场将在 1 分钟内结束，属于超短线！")
+                print("[WARN] 该市场将在 1 分钟内结束，属于超短线！")
                 print("[WARN] 建议等待下一个市场")
                 return None
 
             candidates.append(best)
 
-        # 选择最佳市场（列表第一个是最早结束的）
-        best_match = candidates[0]
+        # 选择最佳市场（优先选择价格居中的市场 - At-The-Money）
+        if len(candidates) > 1:
+            # 按价格排序
+            candidates_sorted_by_price = sorted(candidates, key=lambda x: x['price'])
+            # 选择价格居中的（平值期权流动性最好）
+            middle_index = len(candidates_sorted_by_price) // 2
+            best_match = candidates_sorted_by_price[middle_index]
+
+            print(f"[INFO] 找到 {len(candidates)} 个符合时间窗口的市场")
+            print(f"[INFO] 按行权价格排序，选择平值期权（价格居中）")
+            print(f"[DEBUG] 价格范围: ${candidates_sorted_by_price[0]['price']:,} - ${candidates_sorted_by_price[-1]['price']:,}")
+        else:
+            best_match = candidates[0]
+
         minutes_left = best_match['diff'] / 60
 
         print(f"\n[OK] ✅ 锁定市场!")
         print(f"[INFO] 标题: {best_match['title']}")
+        print(f"[INFO] 行权价格: ${best_match['price']:,}" if best_match['price'] > 0 else "")
         print(f"[INFO] 剩余时间: {minutes_left:.2f} 分钟")
 
         # 智能判断市场类型
         if minutes_left < 5:
-            print("[WARN] ⚠️ 注意：该市场将在 5 分钟内结束，属于超短线！")
+            print("[WARN] 注意：该市场将在 5 分钟内结束，属于超短线！")
         elif minutes_left > 30:
-            print("[WARN] ⚠️ 注意：这是一个长周期市场 (>30分钟)")
+            print("[WARN] 注意：这是一个长周期市场 (>30分钟)")
         else:
             print("[INFO] ✅ 这是一个标准的短周期市场 (5-30分钟)")
 
