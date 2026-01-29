@@ -1,19 +1,22 @@
 """
-做市策略 - 专为 Polymarket 设计
+预测市场做市策略 - 基于学术论文优化
 
-充分利用 NautilusTrader 基础设施：
-- Portfolio 自动管理仓位
-- BettingAccount 自动计算盈亏
-- RiskEngine 自动风险检查
+论文：Market Making in Prediction Markets
+核心思想：
+1. Avellaneda-Stoikov 模型应用到二元期权市场
+2. 价差 = γσ²T（随时间衰减动态调整）
+3. 库存管理（根据持仓调整报价倾斜）
+4. 价格收敛性（随到期时间接近，价格向0或1收敛）
 
-做市策略特点：
-- 使用 GTC 订单（Good-Til-Cancelled）：保持挂单状态，赚取价差
-- 双边报价：同时挂买单和卖单，保持市场中性
-- 不使用 OCO：两边订单独立，成交后继续补单
+优化点：
+- 时间衰减价差（15分钟内动态调整）
+- 库存风险感知
+- 最后5分钟保护机制
 """
 
 from decimal import Decimal
 from typing import Optional
+import time
 
 from nautilus_trader.model.enums import OrderSide, BookType, TimeInForce
 from nautilus_trader.model.objects import Price, Quantity
@@ -21,67 +24,71 @@ from nautilus_trader.model.objects import Price, Quantity
 from .base_strategy import BaseStrategy
 
 
-class MarketMakingStrategy(BaseStrategy):
+class PredictionMarketMMStrategy(BaseStrategy):
     """
-    Polymarket 做市策略
+    预测市场做市策略（基于论文优化）
 
-    核心逻辑：
-    1. 同时挂买单和卖单（赚取价差）
-    2. 库存管理（Skew 倾斜）
-    3. 动态价差调整
-    4. 风险控制
-
-    优势：
-    - 不依赖价格方向
-    - 提供流动性
-    - 利用 Polymarket 大价差特性
+    核心改进：
+    1. 时间衰减价差：s = γσ²T
+    2. 库存风险管理：倾斜调整
+    3. 价格收敛保护：最后5分钟特殊处理
     """
 
     # ========== 默认参数 ==========
 
+    # 风险参数（论文中的γ）
+    DEFAULT_RISK_AVERSION = Decimal("0.5")  # 风险厌恶系数
+
     # 价差参数
     DEFAULT_BASE_SPREAD = Decimal("0.02")    # 2% 基础价差
-    DEFAULT_MIN_SPREAD = Decimal("0.005")   # 0.5% 最小价差
-    DEFAULT_MAX_SPREAD = Decimal("0.10")    # 10% 最大价差
+    DEFAULT_MIN_SPREAD = Decimal("0.01")     # 1% 最小价差
+    DEFAULT_MAX_SPREAD = Decimal("0.15")     # 15% 最大价差
+
+    # 时间衰减参数（关键！）
+    DEFAULT_TIME_DECAY_FACTOR = Decimal("2.0")  # 时间衰减因子
 
     # 订单参数
-    DEFAULT_ORDER_SIZE = 20                 # 每单 20 个
-    DEFAULT_MIN_ORDER_SIZE = 5
-    DEFAULT_MAX_ORDER_SIZE = 50
+    DEFAULT_ORDER_SIZE = 2                 # 每单 2 个（1U）
+    DEFAULT_MIN_ORDER_SIZE = 1
+    DEFAULT_MAX_ORDER_SIZE = 5
 
     # 库存参数
-    DEFAULT_TARGET_INVENTORY = 0            # 目标库存（中性）
-    DEFAULT_MAX_INVENTORY = 200             # 最大库存
-    DEFAULT_INVENTORY_SKEW_FACTOR = Decimal("0.0001")
-    DEFAULT_MAX_SKEW = Decimal("0.02")       # 最大倾斜 2%
-    DEFAULT_HEDGE_THRESHOLD = 80            # 对冲阈值
-    DEFAULT_HEDGE_SIZE = 20                 # 对冲大小
+    DEFAULT_TARGET_INVENTORY = 0
+    DEFAULT_MAX_INVENTORY = 10              # 最大 10 个（5U）
+    DEFAULT_INVENTORY_SKEW_FACTOR = Decimal("0.001")  # 更敏感
+    DEFAULT_MAX_SKEW = Decimal("0.05")
+    DEFAULT_HEDGE_THRESHOLD = 4
+    DEFAULT_HEDGE_SIZE = 3
 
     # 价格参数
-    DEFAULT_MIN_PRICE = Decimal("0.05")     # 5%
-    DEFAULT_MAX_PRICE = Decimal("0.95")     # 95%
+    DEFAULT_MIN_PRICE = Decimal("0.05")
+    DEFAULT_MAX_PRICE = Decimal("0.95")
 
     # 波动率参数
-    DEFAULT_MAX_VOLATILITY = Decimal("0.15") # 15%
-    DEFAULT_VOLATILITY_WINDOW = 100         # 100 个 tick
+    DEFAULT_MAX_VOLATILITY = Decimal("0.15")
+    DEFAULT_VOLATILITY_WINDOW = 30
 
     # 资金参数
-    DEFAULT_MAX_POSITION_RATIO = Decimal("0.5")  # 50%
-    DEFAULT_MAX_DAILY_LOSS = Decimal("-100.0")  # -100 USDC
+    DEFAULT_MAX_POSITION_RATIO = Decimal("0.4")
+    DEFAULT_MAX_DAILY_LOSS = Decimal("-3.0")
 
     # 行为参数
-    DEFAULT_UPDATE_INTERVAL_MS = 1000      # 1 秒更新间隔
+    DEFAULT_UPDATE_INTERVAL_MS = 1000      # 1 秒
+    DEFAULT_END_BUFFER_MINUTES = 5         # 最后5分钟保护
 
     def __init__(self, config):
         super().__init__(config)
 
-        # 必需：instrument_id（BaseStrategy.on_start 需要）
         self.instrument_id = getattr(config, 'instrument_id')
 
-        # 从配置读取参数，使用默认值
+        # 从配置读取参数
         self.base_spread = getattr(config, 'base_spread', self.DEFAULT_BASE_SPREAD)
         self.min_spread = getattr(config, 'min_spread', self.DEFAULT_MIN_SPREAD)
         self.max_spread = getattr(config, 'max_spread', self.DEFAULT_MAX_SPREAD)
+
+        self.risk_aversion = getattr(config, 'risk_aversion', self.DEFAULT_RISK_AVERSION)
+        self.time_decay_factor = getattr(config, 'time_decay_factor', self.DEFAULT_TIME_DECAY_FACTOR)
+        self.end_buffer_minutes = getattr(config, 'end_buffer_minutes', self.DEFAULT_END_BUFFER_MINUTES)
 
         self.order_size = getattr(config, 'order_size', self.DEFAULT_ORDER_SIZE)
         self.min_order_size = getattr(config, 'min_order_size', self.DEFAULT_MIN_ORDER_SIZE)
@@ -111,14 +118,15 @@ class MarketMakingStrategy(BaseStrategy):
 
         # 内部状态
         self._last_update_time_ns = 0
-        self._price_history = []  # 用于计算波动率
+        self._price_history = []
         self._daily_start_pnl = Decimal("0")
         self._daily_start_balance = Decimal("0")
+        self._market_start_time = None  # 市场开始时间（用于计算T）
 
     # ========== 核心逻辑 ==========
 
     def on_order_book(self, order_book):
-        """处理订单簿更新（核心做市逻辑）"""
+        """处理订单簿更新（基于论文优化的做市逻辑）"""
 
         # 1. 检查更新间隔
         now_ns = self.clock.timestamp_ns()
@@ -136,45 +144,54 @@ class MarketMakingStrategy(BaseStrategy):
 
         mid_price = Decimal(mid)
 
-        # 4. 记录价格历史（用于波动率计算）
+        # 4. 记录价格历史
         self._update_price_history(mid_price)
 
-        # 5. 计算价差
+        # 5. 计算剩余时间（关键！）
+        time_remaining = self._get_time_remaining()
+
+        # ⚠️ 最后5分钟保护：停止做市
+        if time_remaining <= self.end_buffer_minutes * 60:
+            self.log.warning(
+                f"距离到期不足 {self.end_buffer_minutes} 分钟，停止做市"
+            )
+            return
+
+        # 6. 计算时间衰减价差（论文公式：s = γσ²T）
         if self.use_dynamic_spread:
-            spread = self._calculate_dynamic_spread(order_book)
+            spread = self._calculate_time_decay_spread(time_remaining)
         else:
             spread = self.base_spread
 
-        # 6. 计算库存倾斜
+        # 7. 计算库存倾斜
         if self.use_inventory_skew:
             skew = self._calculate_inventory_skew()
         else:
             skew = Decimal("0")
 
-        # 7. 计算挂单价格
+        # 8. 计算挂单价格
         half_spread = spread / 2
         bid_price = mid_price * (Decimal("1") - half_spread - skew)
         ask_price = mid_price * (Decimal("1") + half_spread + skew)
 
-        # 8. 计算订单大小
-        order_size = self._calculate_order_size(order_book)
-
         # 9. 提交订单
-        self._submit_market_quotes(bid_price, ask_price, order_size)
+        self._submit_market_quotes(bid_price, ask_price, self.order_size)
 
         # 10. 更新时间戳
         self._last_update_time_ns = now_ns
 
         # 11. 记录日志
+        time_remaining_min = time_remaining / 60
         self.log.info(
             f"\n{'='*60}\n"
-            f"做市参数:\n"
+            f"预测市场做市（基于论文优化）:\n"
             f"  中间价: {mid_price:.4f}\n"
-            f"  价差: {spread*100:.2f}%\n"
-            f"  倾斜: {skew*100:.2f}%\n"
+            f"  剩余时间: {time_remaining_min:.1f} 分钟\n"
+            f"  价差: {spread*100:.2f}% (时间衰减调整)\n"
+            f"  倾斜: {skew*100:.2f}% (库存风险)\n"
             f"  买价: {bid_price:.4f}\n"
             f"  卖价: {ask_price:.4f}\n"
-            f"  订单大小: {order_size}个\n"
+            f"  订单大小: {self.order_size}个\n"
             f"{'='*60}"
         )
 
@@ -187,66 +204,66 @@ class MarketMakingStrategy(BaseStrategy):
             self.log.warning("检测到库存过多，执行对冲")
             self._hedge_inventory()
 
-    # ========== 订单提交 ==========
+    # ========== 论文公式实现 ==========
 
-    def _submit_market_quotes(
-        self,
-        bid_price: Decimal,
-        ask_price: Decimal,
-        order_size: int,
-    ):
+    def _get_time_remaining(self) -> int:
         """
-        提交做市订单（买单 + 卖单）
+        计算距离到期的剩余时间（秒）
 
-        使用 GTC 订单：保持挂单状态，赚取价差
+        对于15分钟市场：
+        - 如果能获取到期时间，使用实际时间
+        - 否则假设15分钟轮次
         """
-        # 创建买单
-        buy_order = self.order_factory.limit(
-            instrument_id=self.instrument.id,
-            price=Price.from_str(str(bid_price)),
-            order_side=OrderSide.BUY,
-            quantity=Quantity.from_int(order_size),
-            post_only=False,
-            time_in_force=TimeInForce.GTC,  # GTC：保持挂单直到成交或取消
-        )
+        # TODO: 从市场数据获取实际到期时间
+        # 目前使用简化假设：每15分钟一轮
 
-        # 创建卖单
-        sell_order = self.order_factory.limit(
-            instrument_id=self.instrument.id,
-            price=Price.from_str(str(ask_price)),
-            order_side=OrderSide.SELL,
-            quantity=Quantity.from_int(order_size),
-            post_only=False,
-            time_in_force=TimeInForce.GTC,  # GTC：保持挂单直到成交或取消
-        )
+        if not self._market_start_time:
+            self._market_start_time = time.time()
 
-        # 提交两个独立的订单（不做 OCO）
-        # 做市策略需要同时在两边挂单，保持中性
-        self.submit_order(buy_order)
-        self.submit_order(sell_order)
+        elapsed = time.time() - self._market_start_time
+        total_duration = 15 * 60  # 15分钟
 
-    # ========== 计算方法 ==========
+        remaining = max(0, total_duration - elapsed)
+        return int(remaining)
 
-    def _calculate_dynamic_spread(self, order_book) -> Decimal:
-        """计算动态价差"""
+    def _calculate_time_decay_spread(self, time_remaining: int) -> Decimal:
+        """
+        基于论文公式计算时间衰减价差
+
+        公式：s = γσ²T
+
+        其中：
+        - γ (gamma) = risk_aversion (风险厌恶系数)
+        - σ² (sigma²) = volatility² (方差)
+        - T = time_remaining (剩余时间)
+
+        逻辑：
+        - 时间越多 → 价差越大（不确定性高）
+        - 时间越少 → 价差越小（但最后5分钟会停止）
+        """
         # 1. 计算波动率
         volatility = self._calculate_volatility()
 
-        # 2. 基础价差
-        spread = self.base_spread
+        # 2. 计算时间权重（归一化到0-1）
+        time_normalized = time_remaining / (15 * 60)  # 15分钟归一化
 
-        # 3. 根据波动率调整
-        if volatility > Decimal("0.05"):  # 高波动 > 5%
-            spread = spread * Decimal("1.5")
-        elif volatility > Decimal("0.03"):  # 中等波动 > 3%
-            spread = spread * Decimal("1.2")
+        # 3. 论文公式：s = γσ²T
+        # 调整：使价差在合理范围内
+        gamma = self.risk_aversion
+        sigma_squared = volatility ** 2
+        T = Decimal(time_normalized) * self.time_decay_factor
 
-        # 4. 限制范围
+        theoretical_spread = gamma * sigma_squared * T
+
+        # 4. 结合基础价差
+        spread = self.base_spread + theoretical_spread
+
+        # 5. 限制范围
         return max(min(spread, self.max_spread), self.min_spread)
 
     def _calculate_inventory_skew(self) -> Decimal:
         """
-        计算库存倾斜
+        计算库存倾斜（基于论文的库存风险管理）
 
         持有过多 YES（+）→ 降低买价，提高卖价 → 鼓励卖出
         持有过多 NO（-）→ 提高买价，降低卖价 → 鼓励买入
@@ -266,30 +283,47 @@ class MarketMakingStrategy(BaseStrategy):
         # 限制最大倾斜
         return max(min(skew, self.max_skew), -self.max_skew)
 
-    def _calculate_order_size(self, order_book) -> int:
-        """动态调整订单大小"""
-        # 获取订单簿深度
-        bids = order_book.bids()
-        asks = order_book.asks()
+    # ========== 订单提交 ==========
 
-        bid_depth = sum(level.size() for level in bids[:5])
-        ask_depth = sum(level.size() for level in asks[:5])
-        avg_depth = (bid_depth + ask_depth) / 2
+    def _submit_market_quotes(
+        self,
+        bid_price: Decimal,
+        ask_price: Decimal,
+        order_size: int,
+    ):
+        """
+        提交做市订单（GTC订单）
+        """
+        # 创建买单
+        buy_order = self.order_factory.limit(
+            instrument_id=self.instrument.id,
+            price=Price.from_str(str(bid_price)),
+            order_side=OrderSide.BUY,
+            quantity=Quantity.from_int(order_size),
+            post_only=False,
+            time_in_force=TimeInForce.GTC,
+        )
 
-        # 根据深度调整
-        if avg_depth < 50:
-            order_size = min(self.order_size, self.min_order_size * 2)
-        elif avg_depth < 200:
-            order_size = self.order_size
-        else:
-            order_size = min(self.order_size, self.max_order_size)
+        # 创建卖单
+        sell_order = self.order_factory.limit(
+            instrument_id=self.instrument.id,
+            price=Price.from_str(str(ask_price)),
+            order_side=OrderSide.SELL,
+            quantity=Quantity.from_int(order_size),
+            post_only=False,
+            time_in_force=TimeInForce.GTC,
+        )
 
-        return int(order_size)
+        # 提交两个独立订单
+        self.submit_order(buy_order)
+        self.submit_order(sell_order)
+
+    # ========== 计算方法 ==========
 
     def _calculate_volatility(self) -> Decimal:
         """计算价格波动率"""
         if len(self._price_history) < 10:
-            return Decimal("0")
+            return Decimal("0.05")  # 默认5%
 
         # 取最近的 N 个价格
         recent_prices = self._price_history[-self.volatility_window:]
@@ -465,3 +499,6 @@ class MarketMakingStrategy(BaseStrategy):
         if account:
             self._daily_start_balance = account['total_balance'].as_decimal()
             self._daily_start_pnl = account['realized_pnl'].as_decimal()
+
+        # 记录市场开始时间
+        self._market_start_time = time.time()

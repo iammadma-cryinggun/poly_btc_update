@@ -2,6 +2,89 @@
 
 基于 NautilusTrader 的 Polymarket 做市策略实现。
 
+## ⚡ 快速开始
+
+### 1. 配置市场
+
+```bash
+python market_config_manager.py
+```
+
+选择"手动输入配置"，然后：
+1. 访问 https://polymarket.com/event/bitcoin-up-or-down-on-january-29
+2. 按 F12 打开开发者工具
+3. 在 Console 中运行:
+   ```javascript
+   const m = __INITIAL_STATE__.markets.activeMarkets[0];
+   console.log('conditionId:', m.conditionId);
+   console.log('token_id:', m.clobTokenIds[0]);
+   ```
+4. 复制并粘贴到配置工具
+
+### 2. 生成 API 凭证
+
+```bash
+python generate_api_credentials.py
+```
+
+### 3. 运行策略
+
+```bash
+python run_market_making_safe.py
+```
+
+**配置:**
+- 资金需求: 5-10 USDC
+- 日亏损限制: 1 USDC
+- 订单大小: 1 token
+- 运行时间: 建议 1-2 小时
+
+## 📅 每天更新市场
+
+### 自动滚动（推荐）
+
+```bash
+python market_config_manager.py --next-day
+```
+
+工具会自动生成下一天的市场 URL，您只需输入新市场的 token。
+
+### 手动更新
+
+```bash
+python market_config_manager.py --manual
+```
+
+## 🛠️ 工具
+
+### market_config_manager.py
+
+市场配置管理工具。
+
+```bash
+# 交互式菜单
+python market_config_manager.py
+
+# 手动配置
+python market_config_manager.py --manual
+
+# 自动滚动到下一天
+python market_config_manager.py --next-day
+
+# 显示当前配置
+python market_config_manager.py --show
+```
+
+### generate_api_credentials.py
+
+生成 Polymarket API 凭证。
+
+```bash
+python generate_api_credentials.py
+```
+
+---
+
 ## 策略说明
 
 ### 核心思想
@@ -12,38 +95,6 @@
 - **持续盈利**: 每笔交易都赚取价差
 - **风险可控**: 多层风险检查
 - **库存管理**: 自动维持中性仓位
-
-## 快速开始
-
-### 1. 安装依赖
-```bash
-pip install nautilus_trader
-```
-
-### 2. 配置环境变量
-创建 `.env` 文件：
-```bash
-POLYMARKET_PK=你的私钥
-```
-
-### 3. 运行策略
-
-#### 小资金测试（推荐）⭐
-```bash
-python run_market_making_safe.py
-```
-- 资金需求: 5-10 USDC
-- 日亏损限制: 1 USDC
-- 订单大小: 1 token
-- 运行时间: 建议 1-2 小时
-
-#### 标准版本
-```bash
-python run_market_making_complete.py
-```
-- 资金需求: 20+ USDC
-- 日亏损限制: 20 USDC
-- 订单大小: 2 tokens
 
 ## 配置参数
 
