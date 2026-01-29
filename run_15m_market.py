@@ -125,10 +125,10 @@ def get_market_info(slug: str):
 def get_latest_15m_btc_market():
     """自动查找最新的15分钟BTC市场"""
     try:
-        # 搜索标题包含 "Bitcoin Up or Down" 的市场
+        # 搜索标题以 "Bitcoin Up or Down" 开头的市场
         url = "https://gamma-api.polymarket.com/markets"
         params = {
-            "query": "Bitcoin Up or Down",  # 精确匹配前端标题
+            "query": "Bitcoin Up or Down",  # 搜索前端标题
             "limit": 50,
             "closing_status": "open",
         }
@@ -141,19 +141,20 @@ def get_latest_15m_btc_market():
         if not markets:
             raise ValueError("未找到BTC市场")
 
-        # 过滤：question 必须包含 "Bitcoin Up or Down"
+        # 过滤：question 必须以 "Bitcoin Up or Down" 开头（不区分大小写）
         filtered_markets = []
         for m in markets:
             question = m.get('question', '')
-            # 精确匹配前端标题
-            if 'Bitcoin Up or Down' in question:
+            # 匹配 "Bitcoin Up or Down" 开头
+            if question.strip().startswith('Bitcoin Up or Down'):
                 filtered_markets.append(m)
 
         if not filtered_markets:
-            print(f"[WARN] 搜索到 {len(markets)} 个市场，但没有找到 'Bitcoin Up or Down' 市场")
-            print(f"[DEBUG] 显示前5个市场:")
-            for i, m in enumerate(markets[:5]):
-                print(f"  {i+1}. {m.get('question', 'N/A')[:80]}...")
+            print(f"[WARN] 搜索到 {len(markets)} 个市场，但没有找到以 'Bitcoin Up or Down' 开头的市场")
+            print(f"[DEBUG] 显示前10个市场的 question:")
+            for i, m in enumerate(markets[:10]):
+                question = m.get('question', 'N/A')
+                print(f"  {i+1}. {question[:100]}")
             raise ValueError("未找到符合条件的15分钟BTC市场")
 
         # 按开始时间排序，取最新的
