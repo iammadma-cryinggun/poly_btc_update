@@ -43,6 +43,10 @@ def generate_api_credentials(private_key: str):
         # Polymarket API URL
         POLYMARKET_API_URL = "https://clob.polymarket.com"
 
+        print(f"[DEBUG] 创建 ClobClient...")
+        print(f"[DEBUG] API URL: {POLYMARKET_API_URL}")
+        print(f"[DEBUG] Private key: {private_key[:10]}...{private_key[-6:]}")
+
         # 创建客户端
         client = ClobClient(
             POLYMARKET_API_URL,
@@ -50,8 +54,12 @@ def generate_api_credentials(private_key: str):
             signature_type=2,  # Magic Wallet
         )
 
+        print(f"[DEBUG] 调用 create_or_derive_api_creds...")
+
         # 生成或获取 API 凭证
         api_creds = client.create_or_derive_api_creds()
+
+        print(f"[DEBUG] API 凭证返回: {type(api_creds)}")
 
         if api_creds:
             # 设置到环境变量
@@ -60,13 +68,16 @@ def generate_api_credentials(private_key: str):
             os.environ['POLYMARKET_PASSPHRASE'] = api_creds.get('passphrase', '')
 
             print(f"[OK] API 凭证已生成")
+            print(f"[DEBUG] API Key: {os.environ['POLYMARKET_API_KEY'][:10]}...")
             return True
         else:
             print("[WARN] 无法生成 API 凭证")
             return False
 
     except Exception as e:
+        import traceback
         print(f"[ERROR] API 凭证生成失败: {e}")
+        print(f"[ERROR] 详细错误: {traceback.format_exc()}")
         return False
 
 
