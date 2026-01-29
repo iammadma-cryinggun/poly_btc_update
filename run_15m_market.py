@@ -96,9 +96,13 @@ def main():
     print("\n[INFO] 导入 NautilusTrader...")
 
     try:
-        from nautilus_trader.adapters.polymarket import POLYMARKET
-        from nautilus_trader.adapters.polymarket import PolymarketDataClientConfig
-        from nautilus_trader.adapters.polymarket import PolymarketExecClientConfig
+        from nautilus_trader.adapters.polymarket import (
+            POLYMARKET,
+            PolymarketDataClientConfig,
+            PolymarketExecClientConfig,
+            PolymarketLiveDataClientFactory,
+            PolymarketLiveExecClientFactory,
+        )
         from nautilus_trader.adapters.polymarket.common.symbol import get_polymarket_instrument_id
         from nautilus_trader.config import InstrumentProviderConfig, LoggingConfig, TradingNodeConfig, StrategyConfig
         from nautilus_trader.live.node import TradingNode

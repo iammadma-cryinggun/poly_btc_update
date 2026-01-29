@@ -13,9 +13,8 @@
 """
 
 from decimal import Decimal
-from typing import Optional
 
-from nautilus_trader.model.enums import OrderSide, BookType, TimeInForce
+from nautilus_trader.model.enums import OrderSide, TimeInForce
 from nautilus_trader.model.objects import Price, Quantity
 
 from .base_strategy import BaseStrategy
