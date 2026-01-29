@@ -195,6 +195,9 @@ def main():
         condition_id, token_id, question, slug = market_info
         print(f"[OK] 成功获取市场信息")
         print(f"    Question: {question[:80]}...")
+        print(f"[DEBUG] condition_id: {condition_id}")
+        print(f"[DEBUG] token_id: {token_id}")
+        print(f"[DEBUG] slug: {slug}")
     else:
         print("\n[ERROR] 无法找到15分钟BTC市场")
         print("[INFO] 请稍后重试，或者检查 Polymarket 是否有15分钟BTC市场")
@@ -220,9 +223,12 @@ def main():
         # 创建 instrument_id
         instrument_id = get_polymarket_instrument_id(condition_id, token_id)
         print(f"[OK] Instrument ID: {instrument_id}")
+        print(f"[DEBUG] Instrument ID 类型: {type(instrument_id)}")
 
-        # 验证 instrument_id 格式
-        print(f"[DEBUG] Instrument ID 格式: {instrument_id}")
+        # 准备 load_ids（确保是字符串的 frozenset）
+        load_ids = frozenset([str(instrument_id)])
+        print(f"[DEBUG] load_ids: {load_ids}")
+        print(f"[DEBUG] load_ids 类型: {type(load_ids)}")
 
         # 创建基于论文优化的预测市场做市策略配置
         class PredictionMarketConfig(StrategyConfig, frozen=True):
@@ -280,7 +286,7 @@ def main():
                     private_key=private_key,
                     signature_type=2,  # Magic Wallet
                     instrument_provider=InstrumentProviderConfig(
-                        load_ids=frozenset([str(instrument_id)]),  # 只加载我们需要的市场
+                        load_ids=load_ids,  # 使用准备好的 load_ids
                     ),
                 ),
             },
