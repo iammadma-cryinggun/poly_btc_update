@@ -20,6 +20,12 @@ from decimal import Decimal
 project_root = Path(__file__).parent
 sys.path.insert(0, str(project_root))
 
+# ========== 关键修复：应用 py_clob_client 补丁 ==========
+# 必须在任何 Polymarket 相关导入之前执行
+try:
+    from patches import py_clob_client_patch  # noqa: F401
+except ImportError:
+    print("[WARN] 补丁模块未找到，余额查询可能无法正常工作")
 
 def load_env():
     """加载私钥并推导钱包地址"""
