@@ -480,13 +480,15 @@ class BaseStrategy(Strategy):
         - 这导致订单簿不更新，on_order_book() 不被调用
         - 解决方案：定时主动查询订单簿，强制触发策略逻辑
         """
-        # 使用 NautilusTrader 的 clock.schedule() 创建定时任务
-        # 每 1 秒触发一次 on_order_book() 方法
         try:
-            # 注册定时器，调用自定义方法
-            self.clock.set_timer(
+            # 使用 set_time_alert 创建循环定时器
+            # 在回调中重新设置下一个定时器，实现循环
+            now_ns = self.clock.timestamp_ns()
+            next_time_ns = now_ns + 1_000_000_000  # 1秒后
+
+            self.clock.set_time_alert(
                 name="strategy_pulse",
-                interval_ns=1_000_000_000,  # 1秒 = 1,000,000,000 纳秒
+                alert_time_ns=next_time_ns,
                 callback=self._on_strategy_timer,
             )
             self.log.info("[TIMER] 策略定时器已启动 - 将每秒主动检查订单簿")
@@ -494,21 +496,36 @@ class BaseStrategy(Strategy):
             self.log.warning(f"[TIMER] 定时器启动失败: {e}")
             self.log.warning("[TIMER] 将依赖被动订单簿更新（可能在僵尸市场中失效）")
 
-    def _on_strategy_timer(self):
+    def _on_strategy_timer(self, event):
         """
         定时器回调：主动获取订单簿并处理
 
         绕过 DataClient 的 QuoteTick 丢弃问题：
         - 直接从 cache 读取订单簿
         - 手动调用 on_order_book() 触发策略逻辑
+        - 重新设置下一个定时器
+
+        Args:
+            event: TimeEvent (NautilusTrader 传递的事件对象)
         """
         try:
             order_book = self.cache.order_book(self.instrument_id)
             if order_book:
                 # 手动触发策略的订单簿处理逻辑
-                # 注意：需要子类实现了 on_order_book 方法
                 if hasattr(self, 'on_order_book'):
                     self.on_order_book(order_book)
         except Exception as e:
             # 静默失败，避免日志噪音
+            pass
+
+        # 重新设置下一个定时器（1秒后）
+        try:
+            next_time_ns = self.clock.timestamp_ns() + 1_000_000_000
+            self.clock.set_time_alert(
+                name="strategy_pulse",
+                alert_time_ns=next_time_ns,
+                callback=self._on_strategy_timer,
+            )
+        except Exception:
+            # 如果重新设置失败，停止循环
             pass
