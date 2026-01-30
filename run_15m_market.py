@@ -443,6 +443,7 @@ def main():
                 POLYMARKET: PolymarketDataClientConfig(
                     private_key=private_key,
                     signature_type=2,  # Magic Wallet
+                    funder=os.getenv('POLYMARKET_FUNDER'),  # 关键：指定 Proxy 地址
                     # 直接内联创建 load_ids，避免变量作用域问题
                     instrument_provider=InstrumentProviderConfig(
                         load_ids=frozenset([str(instrument_id)])
@@ -453,6 +454,7 @@ def main():
                 POLYMARKET: PolymarketExecClientConfig(
                     private_key=private_key,
                     signature_type=2,  # Magic Wallet
+                    funder=os.getenv('POLYMARKET_FUNDER'),  # 关键：指定 Proxy 地址
                 ),
             },
             logging=LoggingConfig(log_level="WARNING"),  # 减少日志噪音
