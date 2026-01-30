@@ -488,7 +488,7 @@ class BaseStrategy(Strategy):
 
             self.clock.set_time_alert(
                 name="strategy_pulse",
-                alert_time_ns=next_time_ns,
+                time_ns=next_time_ns,  # 修正参数名
                 callback=self._on_strategy_timer,
             )
             self.log.info("[TIMER] 策略定时器已启动 - 将每秒主动检查订单簿")
@@ -523,7 +523,7 @@ class BaseStrategy(Strategy):
             next_time_ns = self.clock.timestamp_ns() + 1_000_000_000
             self.clock.set_time_alert(
                 name="strategy_pulse",
-                alert_time_ns=next_time_ns,
+                time_ns=next_time_ns,  # 修正参数名
                 callback=self._on_strategy_timer,
             )
         except Exception:
