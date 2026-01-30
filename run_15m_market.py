@@ -66,20 +66,32 @@ def load_env():
     return private_key
 
 
-def ensure_api_credentials(private_key: str):
-    """确保 API 凭证存在（优先使用环境变量，否则自动生成）"""
-    # 先检查是否已配置
-    api_key = os.getenv('POLYMARKET_API_KEY')
-    api_secret = os.getenv('POLYMARKET_API_SECRET')
-    passphrase = os.getenv('POLYMARKET_PASSPHRASE')
+def ensure_api_credentials(private_key: str, force_regenerate: bool = False):
+    """
+    确保 API 凭证存在
 
-    if all([api_key, api_secret, passphrase]):
-        print(f"[OK] API 凭证已配置")
-        print(f"[DEBUG] API Key: {api_key[:10]}...")
-        return True
+    Args:
+        private_key: 私钥
+        force_regenerate: 是否强制重新生成（忽略环境变量）
+    """
+    # 检查是否需要强制重新生成
+    if force_regenerate:
+        print("[INFO] 强制重新生成 API 凭证...")
+    else:
+        # 先检查是否已配置
+        api_key = os.getenv('POLYMARKET_API_KEY')
+        api_secret = os.getenv('POLYMARKET_API_SECRET')
+        passphrase = os.getenv('POLYMARKET_PASSPHRASE')
 
-    # 未配置，自动生成
-    print("[INFO] API 凭证未配置，正在自动生成...")
+        if all([api_key, api_secret, passphrase]):
+            print(f"[OK] API 凭证已配置")
+            print(f"[DEBUG] API Key: {api_key[:10]}...")
+            return True
+
+        # 未配置，自动生成
+        print("[INFO] API 凭证未配置，正在自动生成...")
+
+    # 自动生成（或强制重新生成）
     try:
         from py_clob_client.client import ClobClient
 
@@ -329,9 +341,10 @@ def main():
 
     print(f"\n[OK] 私钥已加载: {private_key[:10]}...{private_key[-6:]}")
 
-    # 2. 确保 API 凭证存在（自动生成如果未配置）
+    # 2. 确保 API 凭证存在（在 Zeabur 上强制重新生成，避免环境变量格式问题）
     print("\n[INFO] 检查 API 凭证...")
-    if not ensure_api_credentials(private_key):
+    # Zeabur 上强制重新生成，避免环境变量格式问题（比如多余的空格、引号等）
+    if not ensure_api_credentials(private_key, force_regenerate=True):
         print("\n[ERROR] API 凭证获取失败，程序退出")
         return 1
 
