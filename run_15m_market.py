@@ -229,12 +229,59 @@ def get_latest_15m_btc_market():
 
             print(f"[INFO] Time remaining: {minutes_left:.2f} minutes")
 
-            if minutes_left < 5:
+            # ========== 关键优化：自动跳过时间不足的市场 ==========
+            MIN_REQUIRED_MINUTES = 10  # 至少需要10分钟才能做市
+
+            if minutes_left < MIN_REQUIRED_MINUTES:
+                print(f"\n[SKIP] ⚠️  市场剩余时间不足 ({minutes_left:.1f}分钟 < {MIN_REQUIRED_MINUTES}分钟)")
+                print(f"[SKIP] 市场可能已经'僵尸化'（结果已定，流动性枯竭）")
+                print(f"[INFO] 自动尝试下一个市场...")
+
+                # 尝试下一个时间点
+                next_ts = target_ts + 900  # 加 15 分钟
+                next_slug = f"btc-updown-15m-{next_ts}"
+                print(f"[INFO] Next Slug: {next_slug}")
+                print(f"[INFO] Next End Time: {datetime.fromtimestamp(next_ts, tz=timezone.utc).strftime('%Y-%m-%d %H:%M:%S')} UTC")
+
+                # 递归调用下一个市场
+                url = f"https://gamma-api.polymarket.com/markets/slug/{next_slug}"
+                response = requests.get(url, timeout=10)
+
+                if response.status_code == 404:
+                    print(f"[ERROR] 下一个市场也不存在，停止尝试")
+                    return None
+
+                response.raise_for_status()
+                market = response.json()
+
+                print(f"\n[OK] 找到下一个市场!")
+                print(f"[INFO] Question: {market.get('question')}")
+                print(f"[INFO] End Date: {market.get('endDate')}")
+
+                # 重新提取数据
+                condition_id = market.get('conditionId')
+                clob_token_ids_str = market.get('clobTokenIds', '[]')
+                token_ids = json.loads(clob_token_ids_str)
+                question = market.get('question', 'Market')
+                slug = next_slug
+
+                # 重新计算剩余时间
+                end_date = dateutil.parser.isoparse(market.get('endDate'))
+                minutes_left = (end_date - now).total_seconds() / 60
+                print(f"[INFO] New market time remaining: {minutes_left:.2f} minutes")
+
+                if not all([condition_id, token_ids]):
+                    print("[ERROR] Next market data incomplete")
+                    return None
+
+            elif minutes_left < 5:
                 print("[WARN] This market will end in less than 5 minutes!")
             elif minutes_left > 30:
                 print("[WARN] This is a long-period market (>30min)")
             else:
                 print("[INFO] Standard short-period market (5-30min)")
+        else:
+            print("[WARN] No end date found")
 
         print(f"=" * 80)
 

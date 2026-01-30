@@ -153,6 +153,26 @@ class PredictionMarketMMStrategy(BaseStrategy):
             best_bid = order_book.best_bid_price()
             best_ask = order_book.best_ask_price()
 
+            # ========== 僵尸市场检测（早期拦截）==========
+            # 在计算 mid_price 之前就检测原始 bid/ask 值
+            if best_ask is not None and best_bid is None:
+                ask_val = Decimal(best_ask)
+                if ask_val <= Decimal("0.02"):
+                    self.log.warning(
+                        f"[ZOMBIE] 检测到僵尸市场：ask={ask_val:.4f}（接近0），"
+                        f"市场已判定结果，停止做市"
+                    )
+                    return
+
+            if best_bid is not None and best_ask is None:
+                bid_val = Decimal(best_bid)
+                if bid_val >= Decimal("0.98"):
+                    self.log.warning(
+                        f"[ZOMBIE] 检测到僵尸市场：bid={bid_val:.4f}（接近1），"
+                        f"市场已判定结果，停止做市"
+                    )
+                    return
+
             if best_bid is None and best_ask is None:
                 # 情况A：完全空盘 → 使用默认 0.50
                 self.log.warning("[COLD START] 完全空盘口，使用默认中间价 0.50")
@@ -177,7 +197,7 @@ class PredictionMarketMMStrategy(BaseStrategy):
         else:
             mid_price = Decimal(mid)
 
-        # ========== 极端价格保护 ==========
+        # ========== 极端价格保护（双重保险）==========
         if mid_price >= Decimal("0.94") or mid_price <= Decimal("0.06"):
             self.log.warning(
                 f"[RISK] 价格过于极端 {mid_price:.4f}，停止做市以防单边风险"
