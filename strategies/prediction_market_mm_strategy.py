@@ -418,11 +418,20 @@ class PredictionMarketMMStrategy(BaseStrategy):
     ):
         """
         提交做市订单（GTC订单）
+
+        关键修复：量化价格到 instrument 的价格精度，避免 Decimal 高精度导致错误
         """
+        # ========== 量化价格到 instrument 精度 ==========
+        # Polymarket price_precision=3，所以量化到 3 位小数
+        # 避免 "precision greater than max 16, was 28" 错误
+        price_quantization = Decimal("0.001")  # 3位小数
+        bid_price_quantized = bid_price.quantize(price_quantization)
+        ask_price_quantized = ask_price.quantize(price_quantization)
+
         # 创建买单
         buy_order = self.order_factory.limit(
             instrument_id=self.instrument.id,
-            price=Price.from_str(str(bid_price)),
+            price=Price.from_str(str(bid_price_quantized)),
             order_side=OrderSide.BUY,
             quantity=Quantity.from_int(order_size),
             post_only=False,
@@ -432,7 +441,7 @@ class PredictionMarketMMStrategy(BaseStrategy):
         # 创建卖单
         sell_order = self.order_factory.limit(
             instrument_id=self.instrument.id,
-            price=Price.from_str(str(ask_price)),
+            price=Price.from_str(str(ask_price_quantized)),
             order_side=OrderSide.SELL,
             quantity=Quantity.from_int(order_size),
             post_only=False,
