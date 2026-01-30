@@ -10,6 +10,7 @@
 """
 
 from decimal import Decimal
+import threading
 
 from nautilus_trader.trading.strategy import Strategy
 from nautilus_trader.model.identifiers import InstrumentId, Venue
@@ -69,6 +70,8 @@ class BaseStrategy(Strategy):
 
         # ========== 新增：设置定时器，主动触发策略处理 ==========
         # 解决 DataClient 丢弃 QuoteTick 导致 on_order_book 不被调用的问题
+        self._timer_thread = None
+        self._stop_timer_flag = False
         self._start_strategy_timer()
 
     def on_stop(self):
@@ -76,6 +79,11 @@ class BaseStrategy(Strategy):
         self.log.info("=" * 80)
         self.log.info(f"策略停止: {self.id}")
         self.log.info("=" * 80)
+
+        # 停止定时器
+        self._stop_timer_flag = True
+        if self._timer_thread:
+            self._timer_thread.join(timeout=2.0)  # 等待最多2秒
 
         # 打印最终状态
         self.print_account_summary()
@@ -478,54 +486,39 @@ class BaseStrategy(Strategy):
         解决 NautilusTrader DataClient 丢弃残缺 QuoteTick 的问题：
         - 当 bid=None 或 ask=None 时，DataClient 会丢弃 QuoteTick
         - 这导致订单簿不更新，on_order_book() 不被调用
-        - 解决方案：定时主动查询订单簿，强制触发策略逻辑
+        - 解决方案：使用 Python threading.Timer 定时主动查询订单簿
         """
         try:
-            # 使用 set_time_alert 创建循环定时器
-            # 在回调中重新设置下一个定时器，实现循环
-            now_ns = self.clock.timestamp_ns()
-            next_time_ns = now_ns + 1_000_000_000  # 1秒后
-
-            self.clock.set_time_alert(
-                name="strategy_pulse",
-                time_ns=next_time_ns,  # 修正参数名
-                callback=self._on_strategy_timer,
-            )
+            self._stop_timer_flag = False
+            self._run_timer_loop()
             self.log.info("[TIMER] 策略定时器已启动 - 将每秒主动检查订单簿")
         except Exception as e:
             self.log.warning(f"[TIMER] 定时器启动失败: {e}")
             self.log.warning("[TIMER] 将依赖被动订单簿更新（可能在僵尸市场中失效）")
 
-    def _on_strategy_timer(self, event):
+    def _run_timer_loop(self):
         """
-        定时器回调：主动获取订单簿并处理
-
-        绕过 DataClient 的 QuoteTick 丢弃问题：
-        - 直接从 cache 读取订单簿
-        - 手动调用 on_order_book() 触发策略逻辑
-        - 重新设置下一个定时器
-
-        Args:
-            event: TimeEvent (NautilusTrader 传递的事件对象)
+        定时器循环：每秒检查一次订单簿并触发策略逻辑
         """
-        try:
-            order_book = self.cache.order_book(self.instrument_id)
-            if order_book:
-                # 手动触发策略的订单簿处理逻辑
-                if hasattr(self, 'on_order_book'):
+        def timer_callback():
+            if self._stop_timer_flag:
+                return  # 停止循环
+
+            # 执行策略逻辑
+            try:
+                order_book = self.cache.order_book(self.instrument_id)
+                if order_book and hasattr(self, 'on_order_book'):
                     self.on_order_book(order_book)
-        except Exception as e:
-            # 静默失败，避免日志噪音
-            pass
+            except Exception:
+                pass  # 静默失败
 
-        # 重新设置下一个定时器（1秒后）
-        try:
-            next_time_ns = self.clock.timestamp_ns() + 1_000_000_000
-            self.clock.set_time_alert(
-                name="strategy_pulse",
-                time_ns=next_time_ns,  # 修正参数名
-                callback=self._on_strategy_timer,
-            )
-        except Exception:
-            # 如果重新设置失败，停止循环
-            pass
+            # 重新设置定时器（1秒后）
+            if not self._stop_timer_flag:
+                self._timer_thread = threading.Timer(1.0, timer_callback)
+                self._timer_thread.daemon = True  # 设置为守护线程
+                self._timer_thread.start()
+
+        # 启动第一个定时器
+        self._timer_thread = threading.Timer(1.0, timer_callback)
+        self._timer_thread.daemon = True
+        self._timer_thread.start()
